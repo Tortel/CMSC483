@@ -1,7 +1,6 @@
 /*
 Sample taken from here:
 http://www.labbookpages.co.uk/software/imgProc/libPNG.html
-
 */
 
 #include <stdio.h>
@@ -64,9 +63,6 @@ int main(int argc, char *argv[])
       // The 'title' string is stored as part of the PNG file
       printf("Saving PNG\n\n");
       int result = writeImage(out, size, buffer, "This is my test image");
-
-      // Free up the memory used to store the image
-      free(buffer);
    }
 
 	return 0;
@@ -224,6 +220,9 @@ int writeImage(char* filename, int size, float *buffer, char* title)
 	if (info_ptr != NULL) png_free_data(png_ptr, info_ptr, PNG_FREE_ALL, -1);
 	if (png_ptr != NULL) png_destroy_write_struct(&png_ptr, (png_infopp)NULL);
 	if (row != NULL) free(row);
+
+   // Free up the memory used to store the image
+   free(buffer);
 
 	return code;
 }
