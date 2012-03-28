@@ -36,10 +36,10 @@ int main(int argc, char *argv[])
    //Number of iterations per image
    int iterations[] = {20, 25, 30, 35, 40, 50, 100, 300, 500, 1000};
 
-   char out[] = "test0.png";
+   char out[] = "Mandelbrot-0.png";
    for(int pos = 0; pos < 9; pos++){
       printf("Iteration %i\n", pos);
-      out[4] = (char) '0' + pos;
+      out[11] = (char) '0' + pos;
 
       // Create a test image - in this case a Mandelbrot Set fractal
       // The output is a 1D array of floats, length: size * size
