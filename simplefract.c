@@ -11,8 +11,8 @@ http://www.labbookpages.co.uk/software/imgProc/libPNG.html
 #include <stdlib.h>
 #include <sys/time.h>
 
-// Creates a test image for saving. Creates a Mandelbrot Set fractal of size width x height
-float *createMandelbrotImage(int width, int height, float xS, float yS, float rad, int maxIteration);
+// Creates a test image for saving. Creates a Mandelbrot Set fractal of size size x size
+float *createMandelbrotImage(int size, float xS, float yS, float rad, int maxIteration);
 
 // This takes the float value 'val', converts it to red, green & blue values, then
 // sets those values into the image memory buffer location pointed to by 'ptr'
@@ -20,19 +20,17 @@ inline void setRGB(png_byte *ptr, float val);
 
 // This function actually writes out the PNG image file. The string 'title' is
 // also written into the image file
-int writeImage(char* filename, int width, int height, float *buffer, char* title);
+int writeImage(char* filename, int size, float *buffer, char* title);
 
 
 int main(int argc, char *argv[])
 {
    //Image size as first parameter
-   int width, height;
+   int size;
    if(argc == 2){
-      width = atoi(argv[1]);
-      height = width;
+      size = atoi(argv[1]);
    } else{
-      width = 1000;
-      height = width;
+      size = 1000;
    }
    //Timers
    struct timeval start, end;
@@ -45,14 +43,14 @@ int main(int argc, char *argv[])
       out[4] = (char) '0' + pos;
 
       // Create a test image - in this case a Mandelbrot Set fractal
-      // The output is a 1D array of floats, length: width * height
+      // The output is a 1D array of floats, length: size * size
       printf("Creating Image\n");
-      //float *buffer = createMandelbrotImage(width, height, -0.802, -0.177, 0.011, 100);
+      //float *buffer = createMandelbrotImage(size, -0.802, -0.177, 0.011, 100);
 
       //Start Timer
       gettimeofday(&start, NULL);
 
-      float *buffer = createMandelbrotImage(width, height, -0.802, -0.177, 0.011, iterations[pos]);
+      float *buffer = createMandelbrotImage(size, -0.802, -0.177, 0.011, iterations[pos]);
       if (buffer == NULL) {
          return 1;
       }
@@ -65,7 +63,7 @@ int main(int argc, char *argv[])
       // Save the image to a PNG file
       // The 'title' string is stored as part of the PNG file
       printf("Saving PNG\n\n");
-      int result = writeImage(out, width, height, buffer, "This is my test image");
+      int result = writeImage(out, size, buffer, "This is my test image");
 
       // Free up the memory used to store the image
       free(buffer);
@@ -74,9 +72,9 @@ int main(int argc, char *argv[])
 	return 0;
 }
 
-float *createMandelbrotImage(int width, int height, float xS, float yS, float rad, int maxIteration)
+float *createMandelbrotImage(int size, float xS, float yS, float rad, int maxIteration)
 {
-   float *buffer = (float *) malloc(width * height * sizeof(float));
+   float *buffer = (float *) malloc(size * size * sizeof(float));
    if (buffer == NULL) {
       fprintf(stderr, "Could not create image buffer\n");
       return NULL;
@@ -88,13 +86,13 @@ float *createMandelbrotImage(int width, int height, float xS, float yS, float ra
    float minMu = maxIteration;
    float maxMu = 0;
 
-   for (yPos=0 ; yPos<height ; yPos++)
+   for (yPos=0 ; yPos<size ; yPos++)
    {
-      float yP = (yS-rad) + (2.0f*rad/height)*yPos;
+      float yP = (yS-rad) + (2.0f*rad/size)*yPos;
 
-      for (xPos=0 ; xPos<width ; xPos++)
+      for (xPos=0 ; xPos<size ; xPos++)
       {
-         float xP = (xS-rad) + (2.0f*rad/width)*xPos;
+         float xP = (xS-rad) + (2.0f*rad/size)*xPos;
 
          int iteration = 0;
          float x = 0;
@@ -113,16 +111,16 @@ float *createMandelbrotImage(int width, int height, float xS, float yS, float ra
             float mu = iteration - (log(log(modZ))) / log(2);
             if (mu > maxMu) maxMu = mu;
             if (mu < minMu) minMu = mu;
-            buffer[yPos * width + xPos] = mu;
+            buffer[yPos * size + xPos] = mu;
          }
          else {
-            buffer[yPos * width + xPos] = 0;
+            buffer[yPos * size + xPos] = 0;
          }
       }
    }
 
    // Scale buffer values between 0 and 1
-   int count = width * height;
+   int count = size * size;
    while (count) {
       count --;
       buffer[count] = (buffer[count] - minMu) / (maxMu - minMu);
@@ -149,7 +147,7 @@ inline void setRGB(png_byte *ptr, float val)
 	}
 }
 
-int writeImage(char* filename, int width, int height, float *buffer, char* title)
+int writeImage(char* filename, int size, float *buffer, char* title)
 {
 	int code = 0;
 	FILE *fp;
@@ -191,7 +189,7 @@ int writeImage(char* filename, int width, int height, float *buffer, char* title
 	png_init_io(png_ptr, fp);
 
 	// Write header (8 bit colour depth)
-	png_set_IHDR(png_ptr, info_ptr, width, height,
+	png_set_IHDR(png_ptr, info_ptr, size, size,
 			8, PNG_COLOR_TYPE_RGB, PNG_INTERLACE_NONE,
 			PNG_COMPRESSION_TYPE_BASE, PNG_FILTER_TYPE_BASE);
 
@@ -207,13 +205,13 @@ int writeImage(char* filename, int width, int height, float *buffer, char* title
 	png_write_info(png_ptr, info_ptr);
 
 	// Allocate memory for one row (3 bytes per pixel - RGB)
-	row = (png_bytep) malloc(3 * width * sizeof(png_byte));
+	row = (png_bytep) malloc(3 * size * sizeof(png_byte));
 
 	// Write image data
 	int x, y;
-	for (y=0 ; y<height ; y++) {
-		for (x=0 ; x<width ; x++) {
-			setRGB(&(row[x*3]), buffer[y*width + x]);
+	for (y=0 ; y<size ; y++) {
+		for (x=0 ; x<size ; x++) {
+			setRGB(&(row[x*3]), buffer[y*size + x]);
 		}
 		png_write_row(png_ptr, row);
 	}
