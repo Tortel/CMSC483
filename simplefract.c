@@ -68,6 +68,7 @@ int main(int argc, char *argv[])
 	return 0;
 }
 
+// Creates a test image for saving. Creates a Mandelbrot Set fractal of size size x size
 float *createMandelbrotImage(int size, float xS, float yS, float rad, int maxIteration)
 {
    float *buffer = (float *) malloc(size * size * sizeof(float));
@@ -125,24 +126,13 @@ float *createMandelbrotImage(int size, float xS, float yS, float rad, int maxIte
    return buffer;
 }
 
-inline void setRGB(png_byte *ptr, float val)
-{
-	int v = (int)(val * 768);
-	if (v < 0) v = 0;
-	if (v > 768) v = 768;
-	int offset = v % 256;
+/*****************************
+ * Image Writing Code Below  *
+ *****************************
+ */
 
-	if (v<256) {
-		ptr[0] = 0; ptr[1] = 0; ptr[2] = offset;
-	}
-	else if (v<512) {
-		ptr[0] = 0; ptr[1] = offset; ptr[2] = 255-offset;
-	}
-	else {
-		ptr[0] = offset; ptr[1] = 255-offset; ptr[2] = 0;
-	}
-}
-
+// This function actually writes out the PNG image file. The string 'title' is
+// also written into the image file
 int writeImage(char* filename, int size, float *buffer, char* title)
 {
 	int code = 0;
@@ -225,4 +215,24 @@ int writeImage(char* filename, int size, float *buffer, char* title)
    free(buffer);
 
 	return code;
+}
+
+// This takes the float value 'val', converts it to red, green & blue values, then
+// sets those values into the image memory buffer location pointed to by 'ptr'
+inline void setRGB(png_byte *ptr, float val)
+{
+   int v = (int)(val * 768);
+   if (v < 0) v = 0;
+   if (v > 768) v = 768;
+   int offset = v % 256;
+
+   if (v<256) {
+      ptr[0] = 0; ptr[1] = 0; ptr[2] = offset;
+   }
+   else if (v<512) {
+      ptr[0] = 0; ptr[1] = offset; ptr[2] = 255-offset;
+   }
+   else {
+      ptr[0] = offset; ptr[1] = 255-offset; ptr[2] = 0;
+   }
 }
