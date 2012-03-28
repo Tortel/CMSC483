@@ -1,0 +1,12 @@
+# Images
+*.png
+
+# Backup Files
+*~
+
+# Binary
+fractal
+
+# Eclipse stuff
+.project
+.cproject
