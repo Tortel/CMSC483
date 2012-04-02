@@ -19,7 +19,7 @@ inline void setRGB(png_byte *ptr, float val);
 
 // This function actually writes out the PNG image file. The string 'title' is
 // also written into the image file
-int writeImage(char* filename, int size, float *buffer, char* title);
+void *writeImage(char* filename, int size, float *buffer);
 
 
 int main(int argc, char *argv[])
@@ -62,7 +62,7 @@ int main(int argc, char *argv[])
       // Save the image to a PNG file
       // The 'title' string is stored as part of the PNG file
       printf("Saving PNG\n\n");
-      int result = writeImage(out, size, buffer, "This is my test image");
+      writeImage(out, size, buffer);
    }
 
 	return 0;
@@ -133,8 +133,10 @@ float *createMandelbrotImage(int size, float xS, float yS, float rad, int maxIte
 
 // This function actually writes out the PNG image file. The string 'title' is
 // also written into the image file
-int writeImage(char* filename, int size, float *buffer, char* title)
+void *writeImage(char* filename, int size, float *buffer)
 {
+	//Title that is written into the file
+	char title[] = "Fractal";
 	int code = 0;
 	FILE *fp;
 	png_structp png_ptr;
@@ -214,7 +216,6 @@ int writeImage(char* filename, int size, float *buffer, char* title)
    // Free up the memory used to store the image
    free(buffer);
 
-	return code;
 }
 
 // This takes the float value 'val', converts it to red, green & blue values, then
