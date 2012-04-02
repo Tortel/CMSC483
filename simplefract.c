@@ -9,6 +9,18 @@ http://www.labbookpages.co.uk/software/imgProc/libPNG.html
 #include <png.h>
 #include <stdlib.h>
 #include <sys/time.h>
+#include <string.h>
+
+//Structure for passing data to the threads
+typedef struct _thread_data_t{
+	int tid;
+	char *filename;
+	int size;
+	float *buffer;
+} thread_data_t;
+
+
+
 
 // Creates a test image for saving. Creates a Mandelbrot Set fractal of size size x size
 float *createMandelbrotImage(int size, float xS, float yS, float rad, int maxIteration);
@@ -17,9 +29,8 @@ float *createMandelbrotImage(int size, float xS, float yS, float rad, int maxIte
 // sets those values into the image memory buffer location pointed to by 'ptr'
 inline void setRGB(png_byte *ptr, float val);
 
-// This function actually writes out the PNG image file. The string 'title' is
-// also written into the image file
-void *writeImage(char* filename, int size, float *buffer);
+// This function actually writes out the PNG image file
+void *writeImage( void *input);
 
 
 int main(int argc, char *argv[])
@@ -37,8 +48,11 @@ int main(int argc, char *argv[])
    int iterations[] = {20, 25, 30, 35, 40, 50, 100, 300, 500, 1000};
 
    char out[] = "Mandelbrot-0.png";
+   int outSize = strlen(out) + 1;
    for(int pos = 0; pos < 9; pos++){
       printf("Iteration %i\n", pos);
+
+      //11 is the position of the number in the filename
       out[11] = (char) '0' + pos;
 
       // Create a test image - in this case a Mandelbrot Set fractal
@@ -60,9 +74,21 @@ int main(int argc, char *argv[])
       printf("Time: %lf\n", (end.tv_sec + (end.tv_usec/1000000.0)) - (start.tv_sec + (start.tv_usec/1000000.0)));
 
       // Save the image to a PNG file
-      // The 'title' string is stored as part of the PNG file
+      //Set up the struct
+      thread_data_t data;
+      data.buffer = buffer;
+      //Use the iteration number as TID
+      data.tid = pos;
+      data.size = size;
+
+      //Have to copy the filename
+      data.filename = malloc( outSize * sizeof(char) );
+      strncpy(data.filename, out, outSize);
+      //Always make sure to terminate
+      data.filename[outSize - 1] = '\0';
+
       printf("Saving PNG\n\n");
-      writeImage(out, size, buffer);
+      writeImage( (void *) &data);
    }
 
 	return 0;
@@ -131,10 +157,13 @@ float *createMandelbrotImage(int size, float xS, float yS, float rad, int maxIte
  *****************************
  */
 
-// This function actually writes out the PNG image file. The string 'title' is
-// also written into the image file
-void *writeImage(char* filename, int size, float *buffer)
+// This function actually writes out the PNG image file
+void *writeImage(void *input)
 {
+	thread_data_t *data = (thread_data_t *) input;
+	char* filename = data->filename;
+	int size = data->size;
+	float *buffer = data->buffer;
 	//Title that is written into the file
 	char title[] = "Fractal";
 	int code = 0;
@@ -215,7 +244,8 @@ void *writeImage(char* filename, int size, float *buffer)
 
    // Free up the memory used to store the image
    free(buffer);
-
+   free(filename);
+   //free(data);
 }
 
 // This takes the float value 'val', converts it to red, green & blue values, then
