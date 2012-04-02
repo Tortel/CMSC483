@@ -272,6 +272,10 @@ void *writeImage(void *input)
 	if (png_ptr != NULL) png_destroy_write_struct(&png_ptr, (png_infopp)NULL);
 	if (row != NULL) free(row);
 
+	if(code){
+		fprintf(stderr, "Error writing image %i\n", data->tid);
+	}
+
 	if(DEBUG){
 		printf("Writer thread %i ending\n", data->tid);
 	}
