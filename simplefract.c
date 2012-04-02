@@ -10,6 +10,13 @@ http://www.labbookpages.co.uk/software/imgProc/libPNG.html
 #include <stdlib.h>
 #include <sys/time.h>
 #include <string.h>
+#include <pthread.h>
+
+//Number of images/threads
+#define NUM 9
+
+//Debugging printing
+#define DEBUG 1
 
 //Structure for passing data to the threads
 typedef struct _thread_data_t{
@@ -47,9 +54,12 @@ int main(int argc, char *argv[])
    //Number of iterations per image
    int iterations[] = {20, 25, 30, 35, 40, 50, 100, 300, 500, 1000};
 
+   //Array to keep track of pthreads
+   pthread_t threads[NUM];
+
    char out[] = "Mandelbrot-0.png";
    int outSize = strlen(out) + 1;
-   for(int pos = 0; pos < 9; pos++){
+   for(int pos = 0; pos < NUM; pos++){
       printf("Iteration %i\n", pos);
 
       //11 is the position of the number in the filename
@@ -88,10 +98,21 @@ int main(int argc, char *argv[])
       data.filename[outSize - 1] = '\0';
 
       printf("Saving PNG\n\n");
-      writeImage( (void *) &data);
+      //Start the pthread
+      pthread_create(&threads[pos], NULL, writeImage, (void *) &data);
+
+      //writeImage( (void *) &data);
    }
 
-	return 0;
+
+   printf("Waiting for writing threads to finish...\n");
+   //Wait for the pthreads to finish before exiting
+   for(int i =0; i < NUM; i++){
+	   pthread_join(threads[i], NULL);
+   }
+
+   printf("Done!\n");
+   return 0;
 }
 
 // Creates a test image for saving. Creates a Mandelbrot Set fractal of size size x size
@@ -161,6 +182,10 @@ float *createMandelbrotImage(int size, float xS, float yS, float rad, int maxIte
 void *writeImage(void *input)
 {
 	thread_data_t *data = (thread_data_t *) input;
+
+	if(DEBUG){
+		printf("Writer thread %i starting\n", data->tid);
+	}
 	char* filename = data->filename;
 	int size = data->size;
 	float *buffer = data->buffer;
@@ -242,10 +267,17 @@ void *writeImage(void *input)
 	if (png_ptr != NULL) png_destroy_write_struct(&png_ptr, (png_infopp)NULL);
 	if (row != NULL) free(row);
 
+	if(DEBUG){
+		printf("Writer thread %i ending\n", data->tid);
+	}
+
    // Free up the memory used to store the image
    free(buffer);
    free(filename);
    //free(data);
+
+   //Clean thread exit
+   pthread_exit(NULL);
 }
 
 // This takes the float value 'val', converts it to red, green & blue values, then
