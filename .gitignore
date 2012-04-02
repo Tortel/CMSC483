@@ -6,6 +6,8 @@
 
 # Binary
 fractal
+cpu-fractal
+gpu-fractal
 
 # Eclipse stuff
 .project
