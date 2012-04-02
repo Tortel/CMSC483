@@ -67,7 +67,6 @@ int main(int argc, char *argv[])
 
       // Create a test image - in this case a Mandelbrot Set fractal
       // The output is a 1D array of floats, length: size * size
-      printf("Creating Image\n");
       //float *buffer = createMandelbrotImage(size, -0.802, -0.177, 0.011, 100);
 
       //Start Timer
@@ -81,7 +80,7 @@ int main(int argc, char *argv[])
       //End timer
       gettimeofday(&end, NULL);
 
-      printf("Time: %lf\n", (end.tv_sec + (end.tv_usec/1000000.0)) - (start.tv_sec + (start.tv_usec/1000000.0)));
+      printf("Iteration %i time: %lf\n", pos, (end.tv_sec + (end.tv_usec/1000000.0)) - (start.tv_sec + (start.tv_usec/1000000.0)));
 
       // Save the image to a PNG file
       //Set up the struct
@@ -191,6 +190,12 @@ void *writeImage(void *input)
 	float *buffer = data->buffer;
 	//Title that is written into the file
 	char title[] = "Fractal";
+
+	//Timers
+	struct timeval start, end;
+
+	gettimeofday(&start, NULL);
+
 	int code = 0;
 	FILE *fp;
 	png_structp png_ptr;
@@ -271,13 +276,18 @@ void *writeImage(void *input)
 		printf("Writer thread %i ending\n", data->tid);
 	}
 
-   // Free up the memory used to store the image
-   free(buffer);
-   free(filename);
-   //free(data);
+	//End timer
+	gettimeofday(&end, NULL);
 
-   //Clean thread exit
-   pthread_exit(NULL);
+	printf("Writing %i time: %lf\n", data->tid, (end.tv_sec + (end.tv_usec/1000000.0)) - (start.tv_sec + (start.tv_usec/1000000.0)));
+
+	// Free up the memory used to store the image
+	free(buffer);
+	free(filename);
+	//free(data);
+
+	//Clean thread exit
+	pthread_exit(NULL);
 }
 
 // This takes the float value 'val', converts it to red, green & blue values, then
