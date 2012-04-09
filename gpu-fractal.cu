@@ -42,29 +42,10 @@ __device__ float *devBuffer;
 //Min/max mu, used for colors (I think?)
 __device__ float minMu;
 __device__ float maxMu;
-//Temp vars, to use with the atomic max/min
-__device__ unsigned int tMinMu;
-__device__ unsigned int tMaxMu;
 
 
 // Creates a test image for saving. Creates a Mandelbrot Set fractal of size size x size
 __global__ void createMandelbrotImage();
-
-
-/**
- * Functions to convert a float into an unsinged int
- */
-__device__ inline unsigned int FloatFlip(unsigned int f)
-{
-   unsigned int mask = -int(f >> 31) | 0x80000000;
-   return f ^ mask;
-}
-
-__device__ inline unsigned int IFloatFlip(unsigned int f)
-{
-   unsigned int mask = ((f >> 31) - 1) | 0x80000000;
-   return f ^ mask;
-}
 
 
 // This takes the float value 'val', converts it to red, green & blue values, then
@@ -217,38 +198,21 @@ __device__ void createMandelbrotImage()
 
    __syncthreads();
 
-   //Single thread does this
-   if(threadIdx.x ==1 && threadIdx.y == 1){
-      tMaxMu = FloatFlip( 0 );
-      tMinMu = FloatFlip(devMaxIteration);
-   }
-
-   __syncthreads();
 
    if (iteration < devMaxIteration) {
 	   float modZ = sqrt(x*x + y*y);
 	   float mu = iteration - (log2(log2(modZ))) / log2(2.0f);
-	   unsigned int tMu = FloatFlip(mu);
 
-	   atomicMax(&tMaxMu, tMu);
-	   atomicMin(&tMinMu, tMu);
 	   /**
 	    * http://forums.nvidia.com/index.php?showtopic=91491
 	    */
-	   //if(mu > maxMu) atomicExch(&maxMu, mu);//atomicMax( &maxMu, mu); //if (mu > maxMu) maxMu = mu;
-	   //if(mu < minMu) atomicExch(&minMu, mu);//atomicMin( &minMu, mu); //if (mu < minMu) minMu = mu;
+
+	   if(mu > maxMu) atomicExch(&maxMu, mu);//atomicMax( &maxMu, mu); //if (mu > maxMu) maxMu = mu;
+	   if(mu < minMu) atomicExch(&minMu, mu);//atomicMin( &minMu, mu); //if (mu < minMu) minMu = mu;
 	   devBuffer[threadIdx.y * devSize + threadIdx.x] = mu;
    }
    else {
 	   devBuffer[threadIdx.y * devSize + threadIdx.x] = 0;
-   }
-
-   __syncthreads();
-
-   //Single thread
-   if(threadIdx.x == 1 && threadIdx.y == 1){
-      maxMu = IFloatFlip(tMaxMu);
-      minMu = IFloatFlip(tMinMu);
    }
 
    __syncthreads();
