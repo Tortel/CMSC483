@@ -181,9 +181,10 @@ float *createMandelbrotImage(int size, float xS, float yS, float rad, int maxIte
 void *writeImage(void *input)
 {
 	thread_data_t *data = (thread_data_t *) input;
+	int tid = data->tid;
 
 	if(DEBUG){
-		printf("Writer thread %i starting\n", data->tid);
+		printf("Writer thread %i starting\n", tid);
 	}
 	char* filename = data->filename;
 	int size = data->size;
@@ -273,17 +274,17 @@ void *writeImage(void *input)
 	if (row != NULL) free(row);
 
 	if(code){
-		fprintf(stderr, "Error writing image %i\n", data->tid);
+		fprintf(stderr, "Error writing image %i\n", tid);
 	}
 
 	if(DEBUG){
-		printf("Writer thread %i ending\n", data->tid);
+		printf("Writer thread %i ending\n", tid);
 	}
 
 	//End timer
 	gettimeofday(&end, NULL);
 
-	printf("Writing %i time: %lf\n", data->tid, (end.tv_sec + (end.tv_usec/1000000.0)) - (start.tv_sec + (start.tv_usec/1000000.0)));
+	printf("Writing %i time: %lf\n", tid, (end.tv_sec + (end.tv_usec/1000000.0)) - (start.tv_sec + (start.tv_usec/1000000.0)));
 
 	// Free up the memory used to store the image
 	free(buffer);
