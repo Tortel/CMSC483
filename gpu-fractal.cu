@@ -4,7 +4,7 @@ http://www.labbookpages.co.uk/software/imgProc/libPNG.html
 */
 
 #include <stdio.h>
-#include <math.h>
+//#include <math.h>
 #include <malloc.h>
 #include <png.h>
 #include <stdlib.h>
@@ -12,12 +12,13 @@ http://www.labbookpages.co.uk/software/imgProc/libPNG.html
 #include <string.h>
 #include <pthread.h>
 #include <cuda.h>
+#include "error.h"
 
 //Number of images/threads
 #define NUM 9
 
 //Debugging printing
-#define DEBUG 1
+#define D 0
 
 //Structure for passing data to the threads
 typedef struct _thread_data_t{
@@ -37,15 +38,17 @@ __constant__ int devMaxIteration;
 __constant__ int devSize;
 
 //Device buffer
-__device__ float *devBuffer;
+//__device__ float *devBuffer;
 
 //Min/max mu, used for colors (I think?)
-__device__ float minMu;
-__device__ float maxMu;
+//__device__ float minMu;
+//__device__ float maxMu;
 
+//Array of mu values, meant to be used to find the minimum/maximum
+//__device__ float *devMuArr;
 
 // Creates a test image for saving. Creates a Mandelbrot Set fractal of size size x size
-__global__ void createMandelbrotImage();
+__global__ void createMandelbrotImage(float *devBuffer, float *devMuArr);
 
 
 // This takes the float value 'val', converts it to red, green & blue values, then
@@ -77,10 +80,19 @@ int main(int argc, char *argv[])
    int outSize = strlen(out) + 1;
 
    //Copy size to the constant memory
-   cudaMemcpyToSymbol(devSize, &size, sizeof(int));
+   HANDLE_ERROR( cudaMemcpyToSymbol(devSize, &size, sizeof(int)) );
 
    //Allocate the device image buffer
-   cudaMalloc( (void **) &devBuffer, size * size * sizeof(float));
+   float *devBuffer;
+   HANDLE_ERROR( cudaMalloc( (void **) &devBuffer, size * size * sizeof(float)) );
+
+   //Allotcate device mu array
+   float *devMuArr;
+   HANDLE_ERROR( cudaMalloc( (void **) &devMuArr, size * size * sizeof(float)) );
+
+   //Allocate host mu array
+   float *muArr;
+   muArr = (float *) malloc(size * size * sizeof(float));
 
    //Number of cuda threads to start
    dim3  grid(size, size);
@@ -95,6 +107,9 @@ int main(int argc, char *argv[])
       //11 is the position of the number in the filename
       out[11] = (char) '0' + pos;
 
+      float minMu = iterations[pos];
+      float maxMu = 0;
+
       // Create a test image - in this case a Mandelbrot Set fractal
       // The output is a 1D array of floats, length: size * size
       //float *buffer = createMandelbrotImage(size, -0.802, -0.177, 0.011, 100);
@@ -105,31 +120,52 @@ int main(int argc, char *argv[])
       //Copy parameters into device constant memory
       //Need to use a temp variable to hold the parameters (Might be changed to program arguments)
       *tmp = -0.802f;
-      cudaMemcpyToSymbol(xS, tmp, sizeof(float));
+      HANDLE_ERROR( cudaMemcpyToSymbol(xS, tmp, sizeof(float)) );
       *tmp = -0.177f;
-      cudaMemcpyToSymbol(yS, tmp, sizeof(float));
+      HANDLE_ERROR( cudaMemcpyToSymbol(yS, tmp, sizeof(float)) );
       *tmp = 0.011f;
-      cudaMemcpyToSymbol(rad, tmp, sizeof(float));
+      HANDLE_ERROR( cudaMemcpyToSymbol(rad, tmp, sizeof(float)) );
       //Max iteration is in an array
-      cudaMemcpyToSymbol(devMaxIteration, &(iterations[pos]), sizeof(int));
+      HANDLE_ERROR( cudaMemcpyToSymbol(devMaxIteration, &(iterations[pos]), sizeof(int)) );
 
-      //Set up min/max mu
-      *tmp = 0;
-      cudaMemcpy(tmp, &minMu, sizeof(float), cudaMemcpyHostToDevice);
-      *tmp = (float) iterations[pos];
-      cudaMemcpy(tmp, &maxMu, sizeof(float), cudaMemcpyHostToDevice);
+      //Clear device memory
+      HANDLE_ERROR( cudaMemset(devBuffer, 0, size * size * sizeof(float)) );
+      HANDLE_ERROR( cudaMemset(devMuArr, 0, size * size * sizeof(float)) );
 
 
       //Allocate the memory for the image
       float *buffer;
       buffer = (float *) malloc(size * size * sizeof(float));
-      //Note: Dont need to copy to device, just let it be overwritten.
+
+      if(D) printf("Starting kernel\n");
 
       //Start the kernel
-      createMandelbrotImage<<<1,grid>>>();
+      createMandelbrotImage<<<1,grid>>>(devBuffer, devMuArr);
 
       //Copy from device
-      cudaMemcpy(buffer, devBuffer, size * size * sizeof(float), cudaMemcpyDeviceToHost);
+      HANDLE_ERROR( cudaMemcpy( buffer,  devBuffer, size*size*sizeof(float), cudaMemcpyDeviceToHost ) );
+
+      //Get the mu array
+      HANDLE_ERROR( cudaMemcpy(muArr, devMuArr, size*size*sizeof(float), cudaMemcpyDeviceToHost ) );
+
+      //Find mu min/max
+      for(int i = 0; i < size * size; i ++){
+    	  if(D && 0) printf("Mu: %f\n", muArr[i]);
+    	  if(muArr[i] < minMu) minMu = muArr[i];
+    	  if(muArr[i] > maxMu) maxMu = muArr[i];
+      }
+
+      if(D){
+    	  printf("Min mu: %f\n", minMu);
+    	  printf("Max mu: %f\n", maxMu);
+      }
+
+      //Normalize buffer values
+      for(int i = 0; i < size * size; i++){
+    	  if(D && 1) printf("Buffer[%i]: %f \n", i, buffer[i]);
+    	  buffer[i] = (buffer[i] - minMu) / (maxMu - minMu);
+
+      }
 
       //End timer
       gettimeofday(&end, NULL);
@@ -177,16 +213,23 @@ int main(int argc, char *argv[])
  * CUDA Strategy: The original parameters are never actually changed, so why not move them into the constant memory?
  *
  */
-__device__ void createMandelbrotImage()
+__device__ void createMandelbrotImage(float *devBuffer, float *devMuArr)
 {
+
+	if(0 && D && threadIdx.x == 1){
+		printf("devBuffer: %i\n", devBuffer);
+		//printf("devSize: %i\n", devSize);
+		//printf("rad: %f\n", rad);
+		//printf("devMaxIteration: %i\n", devMaxIteration);
+	}
    // Create Mandelbrot set image
    float yP = (yS-rad) + (2.0f*rad/devSize)*threadIdx.y;
 
    float xP = (xS-rad) + (2.0f*rad/devSize)*threadIdx.x;
 
    int iteration = 0;
-   float x = 0;
-   float y = 0;
+   float x = 0.0f;
+   float y = 0.0f;
 
    while (x*x + y+y <= 4 && iteration < devMaxIteration)
    {
@@ -196,31 +239,35 @@ __device__ void createMandelbrotImage()
 	   iteration++;
    }
 
-   __syncthreads();
-
 
    if (iteration < devMaxIteration) {
 	   float modZ = sqrt(x*x + y*y);
-	   float mu = iteration - (log2(log2(modZ))) / log2(2.0f);
+	   float mu = iteration - (log(log(modZ))) / log(2.0f);
+
+	   devMuArr[threadIdx.y * devSize + threadIdx.x] = mu;
 
 	   /**
 	    * http://forums.nvidia.com/index.php?showtopic=91491
 	    */
 
-	   if(mu > maxMu) atomicExch(&maxMu, mu);//atomicMax( &maxMu, mu); //if (mu > maxMu) maxMu = mu;
-	   if(mu < minMu) atomicExch(&minMu, mu);//atomicMin( &minMu, mu); //if (mu < minMu) minMu = mu;
+	   //Moved to host
+	   //if(mu > maxMu) atomicExch(&maxMu, mu);//atomicMax( &maxMu, mu); //if (mu > maxMu) maxMu = mu;
+	   //if(mu < minMu) atomicExch(&minMu, mu);//atomicMin( &minMu, mu); //if (mu < minMu) minMu = mu;
 	   devBuffer[threadIdx.y * devSize + threadIdx.x] = mu;
    }
    else {
 	   devBuffer[threadIdx.y * devSize + threadIdx.x] = 0;
    }
 
-   __syncthreads();
+   //devBuffer[threadIdx.y * devSize + threadIdx.x] = threadIdx.y * devSize + threadIdx.x;
+
+
    // Scale buffer values between 0 and 1
    //int count = devSize * devSize;
    //while (count) {
       //count --;
-   devBuffer[threadIdx.y * devSize + threadIdx.x] = (devBuffer[threadIdx.y + threadIdx.x] - minMu) / (maxMu - minMu);
+   //Moved to host
+   //devBuffer[threadIdx.y * devSize + threadIdx.x] = (devBuffer[threadIdx.y + threadIdx.x] - minMu) / (maxMu - minMu);
    //}
 
    return;
