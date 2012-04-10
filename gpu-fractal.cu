@@ -140,7 +140,7 @@ int main(int argc, char *argv[])
       if(D) printf("Starting kernel\n");
 
       //Start the kernel
-      createMandelbrotImage<<<1,grid>>>(devBuffer, devMuArr);
+      createMandelbrotImage<<<grid,1>>>(devBuffer, devMuArr);
 
       //Copy from device
       HANDLE_ERROR( cudaMemcpy( buffer,  devBuffer, size*size*sizeof(float), cudaMemcpyDeviceToHost ) );
@@ -215,6 +215,9 @@ int main(int argc, char *argv[])
  */
 __device__ void createMandelbrotImage(float *devBuffer, float *devMuArr)
 {
+   int X = blockIdx.x;
+   int Y = blockIdx.y;
+   int offset = X+ Y *gridDim.x;
 
 	if(0 && D && threadIdx.x == 1){
 		printf("devBuffer: %i\n", devBuffer);
@@ -223,9 +226,9 @@ __device__ void createMandelbrotImage(float *devBuffer, float *devMuArr)
 		//printf("devMaxIteration: %i\n", devMaxIteration);
 	}
    // Create Mandelbrot set image
-   float yP = (yS-rad) + (2.0f*rad/devSize)*threadIdx.y;
+   float yP = (yS-rad) + (2.0f*rad/devSize)*Y;
 
-   float xP = (xS-rad) + (2.0f*rad/devSize)*threadIdx.x;
+   float xP = (xS-rad) + (2.0f*rad/devSize)*X;
 
    int iteration = 0;
    float x = 0.0f;
@@ -244,7 +247,7 @@ __device__ void createMandelbrotImage(float *devBuffer, float *devMuArr)
 	   float modZ = sqrt(x*x + y*y);
 	   float mu = iteration - (log(log(modZ))) / log(2.0f);
 
-	   devMuArr[threadIdx.y * devSize + threadIdx.x] = mu;
+	   devMuArr[offset] = mu;
 
 	   /**
 	    * http://forums.nvidia.com/index.php?showtopic=91491
@@ -253,10 +256,10 @@ __device__ void createMandelbrotImage(float *devBuffer, float *devMuArr)
 	   //Moved to host
 	   //if(mu > maxMu) atomicExch(&maxMu, mu);//atomicMax( &maxMu, mu); //if (mu > maxMu) maxMu = mu;
 	   //if(mu < minMu) atomicExch(&minMu, mu);//atomicMin( &minMu, mu); //if (mu < minMu) minMu = mu;
-	   devBuffer[threadIdx.y * devSize + threadIdx.x] = mu;
+	   devBuffer[offset] = mu;
    }
    else {
-	   devBuffer[threadIdx.y * devSize + threadIdx.x] = 0;
+	   devBuffer[offset] = 0;
    }
 
    //devBuffer[threadIdx.y * devSize + threadIdx.x] = threadIdx.y * devSize + threadIdx.x;

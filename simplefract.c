@@ -167,11 +167,11 @@ float *createMandelbrotImage(int size, float xS, float yS, float rad, int maxIte
    while (count) {
       count --;
       buffer[count] = (buffer[count] - minMu) / (maxMu - minMu);
-      printf("Buffer[%i]: %f \n", count, buffer[count]);
+      //printf("Buffer[%i]: %f \n", count, buffer[count]);
    }
 
-   printf("minMu: %f\n", minMu);
-   printf("maxMu: %f\n", maxMu);
+   //printf("minMu: %f\n", minMu);
+   //printf("maxMu: %f\n", maxMu);
 
    return buffer;
 }
