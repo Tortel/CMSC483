@@ -48,7 +48,7 @@ __constant__ int devSize;
 //__device__ float *devMuArr;
 
 // Creates a test image for saving. Creates a Mandelbrot Set fractal of size size x size
-__global__ void createMandelbrotImage(float *devBuffer, float *devMuArr);
+__global__ void createMandelbrotImage(float *devBuffer);
 
 
 // This takes the float value 'val', converts it to red, green & blue values, then
@@ -86,14 +86,6 @@ int main(int argc, char *argv[])
    float *devBuffer;
    HANDLE_ERROR( cudaMalloc( (void **) &devBuffer, size * size * sizeof(float)) );
 
-   //Allotcate device mu array
-   float *devMuArr;
-   HANDLE_ERROR( cudaMalloc( (void **) &devMuArr, size * size * sizeof(float)) );
-
-   //Allocate host mu array
-   float *muArr;
-   muArr = (float *) malloc(size * size * sizeof(float));
-
    //Number of cuda threads to start
    dim3  grid(size, size);
 
@@ -130,7 +122,6 @@ int main(int argc, char *argv[])
 
       //Clear device memory
       HANDLE_ERROR( cudaMemset(devBuffer, 0, size * size * sizeof(float)) );
-      HANDLE_ERROR( cudaMemset(devMuArr, 0, size * size * sizeof(float)) );
 
 
       //Allocate the memory for the image
@@ -140,19 +131,16 @@ int main(int argc, char *argv[])
       if(D) printf("Starting kernel\n");
 
       //Start the kernel
-      createMandelbrotImage<<<grid,1>>>(devBuffer, devMuArr);
+      createMandelbrotImage<<<grid,1>>>(devBuffer);
 
       //Copy from device
       HANDLE_ERROR( cudaMemcpy( buffer,  devBuffer, size*size*sizeof(float), cudaMemcpyDeviceToHost ) );
 
-      //Get the mu array
-      HANDLE_ERROR( cudaMemcpy(muArr, devMuArr, size*size*sizeof(float), cudaMemcpyDeviceToHost ) );
-
       //Find mu min/max
       for(int i = 0; i < size * size; i ++){
-    	  if(D && 0) printf("Mu: %f\n", muArr[i]);
-    	  if(muArr[i] < minMu) minMu = muArr[i];
-    	  if(muArr[i] > maxMu) maxMu = muArr[i];
+    	  if(D && 0) printf("Mu: %f\n", buffer[i]);
+    	  if(buffer[i] < minMu) minMu = buffer[i];
+    	  if(buffer[i] > maxMu) maxMu = buffer[i];
       }
 
       if(D){
@@ -213,7 +201,7 @@ int main(int argc, char *argv[])
  * CUDA Strategy: The original parameters are never actually changed, so why not move them into the constant memory?
  *
  */
-__device__ void createMandelbrotImage(float *devBuffer, float *devMuArr)
+__device__ void createMandelbrotImage(float *devBuffer)
 {
    int X = blockIdx.x;
    int Y = blockIdx.y;
@@ -246,8 +234,6 @@ __device__ void createMandelbrotImage(float *devBuffer, float *devMuArr)
    if (iteration < devMaxIteration) {
 	   float modZ = sqrt(x*x + y*y);
 	   float mu = iteration - (log(log(modZ))) / log(2.0f);
-
-	   devMuArr[offset] = mu;
 
 	   /**
 	    * http://forums.nvidia.com/index.php?showtopic=91491
