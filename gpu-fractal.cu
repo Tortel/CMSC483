@@ -4,19 +4,21 @@ http://www.labbookpages.co.uk/software/imgProc/libPNG.html
 */
 
 #include <stdio.h>
-#include <math.h>
+//#include <math.h>
 #include <malloc.h>
 #include <png.h>
 #include <stdlib.h>
 #include <sys/time.h>
 #include <string.h>
 #include <pthread.h>
+#include <cuda.h>
+#include "error.h"
 
 //Number of images/threads
 #define NUM 9
 
 //Debugging printing
-#define DEBUG 1
+#define D 0
 
 //Structure for passing data to the threads
 typedef struct _thread_data_t{
@@ -26,11 +28,28 @@ typedef struct _thread_data_t{
 	float *buffer;
 } thread_data_t;
 
+//Device constants
+//Original function call:
+// float *createMandelbrotImage(int size, float xS, float yS, float rad, int maxIteration);
+__constant__ float xS;
+__constant__ float yS;
+__constant__ float rad;
+__constant__ int devMaxIteration;
+__constant__ int devSize;
 
+//Device buffer
+//__device__ float *devBuffer;
 
+//Min/max mu, used for colors (I think?)
+//__device__ float minMu;
+//__device__ float maxMu;
+
+//Array of mu values, meant to be used to find the minimum/maximum
+//__device__ float *devMuArr;
 
 // Creates a test image for saving. Creates a Mandelbrot Set fractal of size size x size
-float *createMandelbrotImage(int size, float xS, float yS, float rad, int maxIteration);
+__global__ void createMandelbrotImage(float *devBuffer);
+
 
 // This takes the float value 'val', converts it to red, green & blue values, then
 // sets those values into the image memory buffer location pointed to by 'ptr'
@@ -59,11 +78,29 @@ int main(int argc, char *argv[])
 
    char out[] = "Mandelbrot-0.png";
    int outSize = strlen(out) + 1;
+
+   //Copy size to the constant memory
+   HANDLE_ERROR( cudaMemcpyToSymbol(devSize, &size, sizeof(int)) );
+
+   //Allocate the device image buffer
+   float *devBuffer;
+   HANDLE_ERROR( cudaMalloc( (void **) &devBuffer, size * size * sizeof(float)) );
+
+   //Number of cuda threads to start
+   dim3  grid(size, size);
+
+   //Temp var for parameters
+   float *tmp;
+   tmp = (float *) malloc(sizeof(float));
+
    for(int pos = 0; pos < NUM; pos++){
       printf("Iteration %i\n", pos);
 
       //11 is the position of the number in the filename
       out[11] = (char) '0' + pos;
+
+      float minMu = iterations[pos];
+      float maxMu = 0;
 
       // Create a test image - in this case a Mandelbrot Set fractal
       // The output is a 1D array of floats, length: size * size
@@ -72,9 +109,50 @@ int main(int argc, char *argv[])
       //Start Timer
       gettimeofday(&start, NULL);
 
-      float *buffer = createMandelbrotImage(size, -0.802, -0.177, 0.011, iterations[pos]);
-      if (buffer == NULL) {
-         return 1;
+      //Copy parameters into device constant memory
+      //Need to use a temp variable to hold the parameters (Might be changed to program arguments)
+      *tmp = -0.802f;
+      HANDLE_ERROR( cudaMemcpyToSymbol(xS, tmp, sizeof(float)) );
+      *tmp = -0.177f;
+      HANDLE_ERROR( cudaMemcpyToSymbol(yS, tmp, sizeof(float)) );
+      *tmp = 0.011f;
+      HANDLE_ERROR( cudaMemcpyToSymbol(rad, tmp, sizeof(float)) );
+      //Max iteration is in an array
+      HANDLE_ERROR( cudaMemcpyToSymbol(devMaxIteration, &(iterations[pos]), sizeof(int)) );
+
+      //Clear device memory
+      HANDLE_ERROR( cudaMemset(devBuffer, 0, size * size * sizeof(float)) );
+
+
+      //Allocate the memory for the image
+      float *buffer;
+      buffer = (float *) malloc(size * size * sizeof(float));
+
+      if(D) printf("Starting kernel\n");
+
+      //Start the kernel
+      createMandelbrotImage<<<grid,1>>>(devBuffer);
+
+      //Copy from device
+      HANDLE_ERROR( cudaMemcpy( buffer,  devBuffer, size*size*sizeof(float), cudaMemcpyDeviceToHost ) );
+
+      //Find mu min/max
+      for(int i = 0; i < size * size; i ++){
+    	  if(D && 0) printf("Mu: %f\n", buffer[i]);
+    	  if(buffer[i] < minMu) minMu = buffer[i];
+    	  if(buffer[i] > maxMu) maxMu = buffer[i];
+      }
+
+      if(D){
+    	  printf("Min mu: %f\n", minMu);
+    	  printf("Max mu: %f\n", maxMu);
+      }
+
+      //Normalize buffer values
+      for(int i = 0; i < size * size; i++){
+    	  if(D && 1) printf("Buffer[%i]: %f \n", i, buffer[i]);
+    	  buffer[i] = (buffer[i] - minMu) / (maxMu - minMu);
+
       }
 
       //End timer
@@ -98,11 +176,15 @@ int main(int argc, char *argv[])
 
       printf("Saving PNG\n\n");
       //Start the pthread
-      pthread_create(&threads[pos], NULL, writeImage, (void *) &data);
+      pthread_create(&(threads[pos]), NULL, writeImage, (void *) &data);
+
+      //pthread_join(threads[pos], NULL);
 
       //writeImage( (void *) &data);
    }
 
+   //Free all the device memory
+   cudaFree(devBuffer);
 
    printf("Waiting for writing threads to finish...\n");
    //Wait for the pthreads to finish before exiting
@@ -115,61 +197,69 @@ int main(int argc, char *argv[])
 }
 
 // Creates a test image for saving. Creates a Mandelbrot Set fractal of size size x size
-float *createMandelbrotImage(int size, float xS, float yS, float rad, int maxIteration)
+/**
+ * CUDA Strategy: The original parameters are never actually changed, so why not move them into the constant memory?
+ *
+ */
+__device__ void createMandelbrotImage(float *devBuffer)
 {
-   float *buffer = (float *) malloc(size * size * sizeof(float));
-   if (buffer == NULL) {
-      fprintf(stderr, "Could not create image buffer\n");
-      return NULL;
-   }
+   int X = blockIdx.x;
+   int Y = blockIdx.y;
+   int offset = X+ Y *gridDim.x;
 
+	if(0 && D && threadIdx.x == 1){
+		printf("devBuffer: %i\n", devBuffer);
+		//printf("devSize: %i\n", devSize);
+		//printf("rad: %f\n", rad);
+		//printf("devMaxIteration: %i\n", devMaxIteration);
+	}
    // Create Mandelbrot set image
+   float yP = (yS-rad) + (2.0f*rad/devSize)*Y;
 
-   int xPos, yPos;
-   float minMu = maxIteration;
-   float maxMu = 0;
+   float xP = (xS-rad) + (2.0f*rad/devSize)*X;
 
-   for (yPos=0 ; yPos<size ; yPos++)
+   int iteration = 0;
+   float x = 0.0f;
+   float y = 0.0f;
+
+   while (x*x + y+y <= 4 && iteration < devMaxIteration)
    {
-      float yP = (yS-rad) + (2.0f*rad/size)*yPos;
-
-      for (xPos=0 ; xPos<size ; xPos++)
-      {
-         float xP = (xS-rad) + (2.0f*rad/size)*xPos;
-
-         int iteration = 0;
-         float x = 0;
-         float y = 0;
-
-         while (x*x + y+y <= 4 && iteration < maxIteration)
-         {
-            float tmp = x*x - y*y + xP;
-            y = 2*x*y + yP;
-            x = tmp;
-            iteration++;
-         }
-
-         if (iteration < maxIteration) {
-            float modZ = sqrt(x*x + y*y);
-            float mu = iteration - (log(log(modZ))) / log(2);
-            if (mu > maxMu) maxMu = mu;
-            if (mu < minMu) minMu = mu;
-            buffer[yPos * size + xPos] = mu;
-         }
-         else {
-            buffer[yPos * size + xPos] = 0;
-         }
-      }
+	   float tmp = x*x - y*y + xP;
+	   y = 2*x*y + yP;
+	   x = tmp;
+	   iteration++;
    }
+
+
+   if (iteration < devMaxIteration) {
+	   float modZ = sqrt(x*x + y*y);
+	   float mu = iteration - (log(log(modZ))) / log(2.0f);
+
+	   /**
+	    * http://forums.nvidia.com/index.php?showtopic=91491
+	    */
+
+	   //Moved to host
+	   //if(mu > maxMu) atomicExch(&maxMu, mu);//atomicMax( &maxMu, mu); //if (mu > maxMu) maxMu = mu;
+	   //if(mu < minMu) atomicExch(&minMu, mu);//atomicMin( &minMu, mu); //if (mu < minMu) minMu = mu;
+	   devBuffer[offset] = mu;
+   }
+   else {
+	   devBuffer[offset] = 0;
+   }
+
+   //devBuffer[threadIdx.y * devSize + threadIdx.x] = threadIdx.y * devSize + threadIdx.x;
+
 
    // Scale buffer values between 0 and 1
-   int count = size * size;
-   while (count) {
-      count --;
-      buffer[count] = (buffer[count] - minMu) / (maxMu - minMu);
-   }
+   //int count = devSize * devSize;
+   //while (count) {
+      //count --;
+   //Moved to host
+   //devBuffer[threadIdx.y * devSize + threadIdx.x] = (devBuffer[threadIdx.y + threadIdx.x] - minMu) / (maxMu - minMu);
+   //}
 
-   return buffer;
+   return;
 }
 
 /*****************************
@@ -181,10 +271,9 @@ float *createMandelbrotImage(int size, float xS, float yS, float rad, int maxIte
 void *writeImage(void *input)
 {
 	thread_data_t *data = (thread_data_t *) input;
+	int tid = data->tid;
 
-	if(DEBUG){
-		printf("Writer thread %i starting\n", data->tid);
-	}
+	printf("Writer thread %i starting\n", tid);
 	char* filename = data->filename;
 	int size = data->size;
 	float *buffer = data->buffer;
@@ -273,21 +362,21 @@ void *writeImage(void *input)
 	if (row != NULL) free(row);
 
 	if(code){
-		fprintf(stderr, "Error writing image %i\n", data->tid);
+		fprintf(stderr, "Error writing image %i\n", tid);
 	}
 
-	if(DEBUG){
-		printf("Writer thread %i ending\n", data->tid);
-	}
+
+	printf("Writer thread %i ending\n", tid);
+
 
 	//End timer
 	gettimeofday(&end, NULL);
 
-	printf("Writing %i time: %lf\n", data->tid, (end.tv_sec + (end.tv_usec/1000000.0)) - (start.tv_sec + (start.tv_usec/1000000.0)));
+	printf("Writing %i time: %lf\n", tid, (end.tv_sec + (end.tv_usec/1000000.0)) - (start.tv_sec + (start.tv_usec/1000000.0)));
 
 	// Free up the memory used to store the image
-	free(buffer);
-	free(filename);
+	//free(buffer);
+	//free(filename);
 	//free(data);
 
 	//Clean thread exit
