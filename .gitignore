@@ -8,6 +8,7 @@
 fractal
 cpu-fractal
 gpu-fractal
+cpu-julia
 
 # Eclipse stuff
 .project
