@@ -2,6 +2,7 @@
 all: simplefract.c gpu-fractal.cu
 	gcc -std=c99 -O2 -lm -lpng -pthread -o cpu-fractal simplefract.c
 	nvcc -arch=sm_20 -O2 -lm -lpng -o gpu-fractal gpu-fractal.cu
+	nvcc -arch=sm_20 -O2 -lm -lpng -o gpu-test fracttest.cu
 	g++ -lm -lpng -pthread -o cpu-julia fracttest.cpp 
 
 # remove output files
@@ -9,4 +10,5 @@ all: simplefract.c gpu-fractal.cu
 clean:
 	rm -f cpu-fractal
 	rm -f gpu-fractal
+	rm -f gpu-test
 	rm -f *.png
