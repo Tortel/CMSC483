@@ -76,18 +76,21 @@ struct cuComplex {
 
 int main(int argc, char *argv[])
 {
+	if(argc != 3){
+		printf("Usage: gpu-fractal <Image size> <m or j>\n");
+		printf("\t*Image size is an integer, and is the size of the square image to output\n");
+		printf("\t*Use m/M to generate a Mandelbrot fractal, j/J for a Julia fractal\n");
+		return -1;
+	}
    //Image size as first parameter
    int size;
-   if(argc >= 2){
-      size = atoi(argv[1]);
-   } else{
-      size = 1000;
-   }
+   size = atoi(argv[1]);
 
    int mandelbrot = 0;
-   if(argv[2][0] == 'm' || argv[2][0] == 'M'){
+
+   //Julia or Mandelbrot image
+   if(argv[2][0] == 'm' || argv[2][0] == 'M')
 	   mandelbrot = 1;
-   }
 
    //Timers
    struct timeval start, end;
