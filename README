@@ -1,0 +1,5 @@
+To compile, run make.
+You need to make sure that nvcc and g++ are in your PATH.
+It will output two programs: cpu-fractal and gpu-fractal
+You need to supply 2 arguments to either program: the image size (Pixels) and the fractal type (m or j).
+If you dont supply the correct parameters, it will tell you and exit.

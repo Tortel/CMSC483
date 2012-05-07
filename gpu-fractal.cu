@@ -89,8 +89,16 @@ int main(int argc, char *argv[])
    int mandelbrot = 0;
 
    //Julia or Mandelbrot image
-   if(argv[2][0] == 'm' || argv[2][0] == 'M')
+   if(argv[2][0] == 'm' || argv[2][0] == 'M'){
 	   mandelbrot = 1;
+   } else if(argv[2][0] == 'j' || argv[2][0] == 'J'){
+       mandelbrot = 0;
+   } else {
+		printf("Usage: %s <Image size> <m or j>\n", argv[0]);
+		printf("\t*Image size is an integer, and is the size of the square image to output\n");
+		printf("\t*Use m/M to generate a Mandelbrot fractal, j/J for a Julia fractal\n");
+		return -1;
+   }
 
    //Timers
    struct timeval start, end;
