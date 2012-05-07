@@ -72,7 +72,7 @@ float *j_kernel(int size, int iterations );
 int main(int argc, char *argv[])
 {
 	if(argc != 3){
-		printf("Usage: cpu-fractal <Image size> <m or j>\n");
+		printf("Usage: %s <Image size> <m or j>\n", argv[0]);
 		printf("\t*Image size is an integer, and is the size of the square image to output\n");
 		printf("\t*Use m/M to generate a Mandelbrot fractal, j/J for a Julia fractal\n");
 		return -1;
