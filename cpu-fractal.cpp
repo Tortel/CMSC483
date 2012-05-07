@@ -16,7 +16,10 @@ http://www.labbookpages.co.uk/software/imgProc/libPNG.html
 #define NUM 9
 
 //Debugging printing
-#define DEBUG 1
+#define WRITE_V 0
+
+//Scale factor for Julia fractal
+#define J_SCALE 1.5
 
 //Structure for passing data to the threads
 typedef struct _thread_data_t{
@@ -26,11 +29,8 @@ typedef struct _thread_data_t{
 	float *buffer;
 } thread_data_t;
 
-
-
-
 // Creates a test image for saving. Creates a Mandelbrot Set fractal of size size x size
-float *createMandelbrotImage(int size, float xS, float yS, float rad, int maxIteration);
+float *m_kernel(int size, float xS, float yS, float rad, int maxIteration);
 
 // This takes the float value 'val', converts it to red, green & blue values, then
 // sets those values into the image memory buffer location pointed to by 'ptr'
@@ -39,12 +39,13 @@ inline void setRGB(png_byte *ptr, float val);
 // This function actually writes out the PNG image file
 void *writeImage( void *input);
 
+//Functions to handle running either fractal
+void doMandelbrot(int size);
+void doJulia(int size);
 
-/****************************************************************
- * Start julia test code
+/**
+ * Struct for complex numbers, used in the Julia fractal
  */
-float scale = 1.5;
-
 struct cuComplex {
    float   r;
    float   i;
@@ -58,133 +59,188 @@ struct cuComplex {
    }
 };
 
-float julia(int size, int x, int y ) {
-   float jx = scale * (float)(size/2 - x)/(size/2);
-   float jy = scale * (float)(size/2 - y)/(size/2);
 
-   cuComplex c(-0.8, 0.156);
-   cuComplex a(jx, jy);
+float julia(int size, int x, int y, int iterations );
 
-   int i = 0;
-   for (i=0; i<500; i++) {
-      a = a * a + c;
-      if (a.magnitude2() > 2000)
-        return a.magnitude2();
-   }
+float *j_kernel(int size, int iterations );
 
-   return a.magnitude2();
-}
-
-float *j_kernel(int size ){
-   float *ptr = (float *) malloc(size * size * sizeof(float));
-
-   for (int y=0; y<size; y++) {
-      for (int x=0; x<size; x++) {
-         ptr[y * size + x] = julia(size, x, y );
-         //printf("(%d, %d) = %f\n", x, y, ptr[y*size+x]);
-      }
-   }
-
-   //Find the max
-   float maxValue = 0;
-   for(int i = 0; i < size*size; i++){
-      if(ptr[i] > maxValue){
-         maxValue = ptr[i];
-      }
-   }
-   //scale between 0-1
-   for(int i = 0; i < size*size; i++){
-         ptr[i] = ptr[i] / maxValue;
-         //Inverse to remove lots of black
-         ptr[i] = 1 / ptr[i];
-   }
-
-   return ptr;
-}
 /************************************************************
  * End julia test code
  */
-
-
 
 
 int main(int argc, char *argv[])
 {
    //Image size as first parameter
    int size;
-   if(argc == 2){
+   if(argc >= 2){
       size = atoi(argv[1]);
    } else{
       size = 1000;
    }
+
+   int mandelbrot = 0;
+
+   //Julia or Mandelbrot image
+   if(argc == 3){
+	   if(argv[2][0] == 'm' || argv[2][0] == 'M')
+		   mandelbrot = 1;
+   }
+
    //Timers
    struct timeval start, end;
-   //Number of iterations per image
-   int iterations[] = {20, 25, 30, 35, 40, 50, 100, 300, 500, 1000};
 
-   //Array to keep track of pthreads
-   pthread_t threads[NUM];
+   gettimeofday(&start, NULL);
 
-   char out[] = "Julia-0.png";
-   int outSize = strlen(out) + 1;
-   for(int pos = 0; pos < NUM; pos++){
-      printf("Iteration %i\n", pos);
-
-      //11 is the position of the number in the filename
-      out[6] = (char) '0' + pos;
-
-      // Create a test image - in this case a Mandelbrot Set fractal
-      // The output is a 1D array of floats, length: size * size
-      //float *buffer = createMandelbrotImage(size, -0.802, -0.177, 0.011, 100);
-
-      //Start Timer
-      gettimeofday(&start, NULL);
-
-      //float *buffer = createMandelbrotImage(size, -0.802, -0.177, 0.011, iterations[pos]);
-      float *buffer = j_kernel(size);
-      if (buffer == NULL) {
-         return 1;
-      }
-
-      //End timer
-      gettimeofday(&end, NULL);
-
-      printf("Iteration %i time: %lf\n", pos, (end.tv_sec + (end.tv_usec/1000000.0)) - (start.tv_sec + (start.tv_usec/1000000.0)));
-
-      // Save the image to a PNG file
-      //Set up the struct
-      thread_data_t data;
-      data.buffer = buffer;
-      //Use the iteration number as TID
-      data.tid = pos;
-      data.size = size;
-
-      //Have to copy the filename
-      data.filename = (char *) malloc( outSize * sizeof(char) );
-      strncpy(data.filename, out, outSize);
-      //Always make sure to terminate
-      data.filename[outSize - 1] = '\0';
-
-      printf("Saving PNG\n\n");
-      //Start the pthread
-      pthread_create(&threads[pos], NULL, writeImage, (void *) &data);
-
-      //writeImage( (void *) &data);
+   if(mandelbrot){
+	   doMandelbrot(size);
+   } else {
+	   doJulia(size);
    }
 
+   gettimeofday(&end, NULL);
 
-   printf("Waiting for writing threads to finish...\n");
-   //Wait for the pthreads to finish before exiting
-   for(int i =0; i < NUM; i++){
-	   pthread_join(threads[i], NULL);
-   }
-
+   printf("\n\n Total time: %lf\n", (end.tv_sec + (end.tv_usec/1000000.0)) - (start.tv_sec + (start.tv_usec/1000000.0)));
    printf("Done!\n");
    return 0;
 }
 
+/**
+ * Run the whole mandelbrot procedure
+ */
+void doMandelbrot(int size){
+	//Timers
+	struct timeval start, end;
+
+	//Number of iterations per image
+	int iterations[] = {20, 25, 30, 35, 40, 50, 100, 300, 500, 1000};
+
+	//Array to keep track of pthreads
+	pthread_t threads[NUM];
+
+	char out[] = "Mandelbrot-0.png";
+	int outSize = strlen(out) + 1;
+	for(int pos = 0; pos < NUM; pos++){
+		printf("Iteration %i\n", pos);
+
+		//11 is the position of the number in the filename
+		out[11] = (char) '0' + pos;
+
+		// Create a test image - in this case a Mandelbrot Set fractal
+		// The output is a 1D array of floats, length: size * size
+		//float *buffer = createMandelbrotImage(size, -0.802, -0.177, 0.011, 100);
+
+		//Start Timer
+		gettimeofday(&start, NULL);
+
+		float *buffer = m_kernel(size, -0.802, -0.177, 0.011, iterations[pos]);
+		if (buffer == NULL) {
+			printf("Image buffer error, exiting\n");
+			return;
+		}
+
+		//End timer
+		gettimeofday(&end, NULL);
+
+		printf("Iteration %i time: %lf\n", pos, (end.tv_sec + (end.tv_usec/1000000.0)) - (start.tv_sec + (start.tv_usec/1000000.0)));
+
+		// Save the image to a PNG file
+		//Set up the struct
+		thread_data_t data;
+		data.buffer = buffer;
+		//Use the iteration number as TID
+		data.tid = pos;
+		data.size = size;
+
+		//Have to copy the filename
+		data.filename = (char *) malloc( outSize * sizeof(char) );
+		strncpy(data.filename, out, outSize);
+		//Always make sure to terminate
+		data.filename[outSize - 1] = '\0';
+
+		printf("Saving PNG\n\n");
+		//Start the pthread
+		pthread_create(&threads[pos], NULL, writeImage, (void *) &data);
+
+	}
+
+
+	printf("Waiting for writing threads to finish...\n");
+	//Wait for the pthreads to finish before exiting
+	for(int i =0; i < NUM; i++){
+		pthread_join(threads[i], NULL);
+	}
+}
+
+/**
+ * Handle the whole Julia fractal procedure
+ */
+void doJulia(int size){
+	//Timers
+	struct timeval start, end;
+
+	//Number of iterations per image
+	int iterations[] = {20, 25, 30, 35, 40, 50, 100, 200, 400};
+
+	//Array to keep track of pthreads
+	pthread_t threads[NUM];
+
+	char out[] = "Julia-0.png";
+	int outSize = strlen(out) + 1;
+	for(int pos = 0; pos < NUM; pos++){
+		printf("Iteration %i\n", pos);
+
+		//6 is the position of the number in the filename
+		out[6] = (char) '0' + pos;
+
+		// Create a test image - in this case a Mandelbrot Set fractal
+		// The output is a 1D array of floats, length: size * size
+		//float *buffer = createMandelbrotImage(size, -0.802, -0.177, 0.011, 100);
+
+		//Start Timer
+		gettimeofday(&start, NULL);
+
+		float *buffer = j_kernel(size, iterations[pos]);
+		if (buffer == NULL) {
+			printf("Image buffer error, exiting\n");
+			return;
+		}
+
+		//End timer
+		gettimeofday(&end, NULL);
+
+		printf("Iteration %i time: %lf\n", pos, (end.tv_sec + (end.tv_usec/1000000.0)) - (start.tv_sec + (start.tv_usec/1000000.0)));
+
+		// Save the image to a PNG file
+		//Set up the struct
+		thread_data_t data;
+		data.buffer = buffer;
+		//Use the iteration number as TID
+		data.tid = pos;
+		data.size = size;
+
+		//Have to copy the filename
+		data.filename = (char *) malloc( outSize * sizeof(char) );
+		strncpy(data.filename, out, outSize);
+		//Always make sure to terminate
+		data.filename[outSize - 1] = '\0';
+
+		printf("Saving PNG\n\n");
+		//Start the pthread
+		pthread_create(&threads[pos], NULL, writeImage, (void *) &data);
+		pthread_join(threads[pos], NULL);
+	}
+
+
+	printf("Waiting for writing threads to finish...\n");
+	//Wait for the pthreads to finish before exiting
+	for(int i =0; i < NUM; i++){
+		pthread_join(threads[i], NULL);
+	}
+}
+
 // Creates a test image for saving. Creates a Mandelbrot Set fractal of size size x size
-float *createMandelbrotImage(int size, float xS, float yS, float rad, int maxIteration)
+float *m_kernel(int size, float xS, float yS, float rad, int maxIteration)
 {
    float *buffer = (float *) malloc(size * size * sizeof(float));
    if (buffer == NULL) {
@@ -245,6 +301,52 @@ float *createMandelbrotImage(int size, float xS, float yS, float rad, int maxIte
    return buffer;
 }
 
+/**
+ * Calculates the Julia function value for the specific point
+ */
+float julia(int size, int x, int y, int iterations ) {
+   float jx = J_SCALE * (float)(size/2 - x)/(size/2);
+   float jy = J_SCALE * (float)(size/2 - y)/(size/2);
+
+   cuComplex c(-0.8, 0.156);
+   cuComplex a(jx, jy);
+
+   int i = 0;
+   for (i=0; i<iterations; i++) {
+      a = a * a + c;
+      if (a.magnitude2() > 50000)
+        return 0;//a.magnitude2();
+   }
+
+   return a.magnitude2();
+}
+
+float *j_kernel(int size, int iterations){
+   float *ptr = (float *) malloc(size * size * sizeof(float));
+
+   for (int y=0; y<size; y++) {
+      for (int x=0; x<size; x++) {
+         ptr[y * size + x] = julia(size, x, y, iterations);
+      }
+   }
+
+   //Find the max
+   float maxValue = 0;
+   for(int i = 0; i < size*size; i++){
+      if(ptr[i] > maxValue){
+         maxValue = ptr[i];
+      }
+   }
+   //scale between 0-1
+   for(int i = 0; i < size*size; i++){
+         ptr[i] = ptr[i] / maxValue;
+         //Inverse to remove lots of black
+         ptr[i] = 1 / ptr[i];
+   }
+
+   return ptr;
+}
+
 /*****************************
  * Image Writing Code Below  *
  *****************************
@@ -256,7 +358,7 @@ void *writeImage(void *input)
 	thread_data_t *data = (thread_data_t *) input;
 	int tid = data->tid;
 
-	if(DEBUG){
+	if(WRITE_V){
 		printf("Writer thread %i starting\n", tid);
 	}
 	char* filename = data->filename;
@@ -318,7 +420,7 @@ void *writeImage(void *input)
 	if (title != NULL) {
 		png_text title_text;
 		title_text.compression = PNG_TEXT_COMPRESSION_NONE;
-		title_text.key = "Title";
+		title_text.key = title;//"Title";
 		title_text.text = title;
 		png_set_text(png_ptr, info_ptr, &title_text, 1);
 	}
@@ -331,6 +433,7 @@ void *writeImage(void *input)
 	// Write image data
 	int x, y;
 	for (y=0 ; y<size ; y++) {
+		fflush(stdout);
 		for (x=0 ; x<size ; x++) {
 			setRGB(&(row[x*3]), buffer[y*size + x]);
 		}
@@ -350,14 +453,16 @@ void *writeImage(void *input)
 		fprintf(stderr, "Error writing image %i\n", tid);
 	}
 
-	if(DEBUG){
+	if(WRITE_V){
 		printf("Writer thread %i ending\n", tid);
 	}
 
 	//End timer
 	gettimeofday(&end, NULL);
 
-	printf("Writing %i time: %lf\n", tid, (end.tv_sec + (end.tv_usec/1000000.0)) - (start.tv_sec + (start.tv_usec/1000000.0)));
+	if(WRITE_V){
+		printf("Writing %i time: %lf\n", tid, (end.tv_sec + (end.tv_usec/1000000.0)) - (start.tv_sec + (start.tv_usec/1000000.0)));
+	}
 
 	// Free up the memory used to store the image
 	free(buffer);

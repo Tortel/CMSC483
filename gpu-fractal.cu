@@ -18,7 +18,8 @@ http://www.labbookpages.co.uk/software/imgProc/libPNG.html
 #define NUM 9
 
 //Debugging printing
-#define D 0
+#define WRITE_V 0
+#define J_SCALE 1.5f
 
 //Structure for passing data to the threads
 typedef struct _thread_data_t{
@@ -37,19 +38,13 @@ __constant__ float rad;
 __constant__ int devMaxIteration;
 __constant__ int devSize;
 
-//Device buffer
-//__device__ float *devBuffer;
-
-//Min/max mu, used for colors (I think?)
-//__device__ float minMu;
-//__device__ float maxMu;
-
-//Array of mu values, meant to be used to find the minimum/maximum
-//__device__ float *devMuArr;
 
 // Creates a test image for saving. Creates a Mandelbrot Set fractal of size size x size
 __global__ void createMandelbrotImage(float *devBuffer);
 
+//Julia kernel code
+__global__ void j_kernel(float *ptr );
+__device__ float julia(int x, int y );
 
 // This takes the float value 'val', converts it to red, green & blue values, then
 // sets those values into the image memory buffer location pointed to by 'ptr'
@@ -58,143 +53,286 @@ inline void setRGB(png_byte *ptr, float val);
 // This function actually writes out the PNG image file
 void *writeImage( void *input);
 
+//Functions to run the specific code
+void doMandelbrot(int size);
+void doJulia(int size);
+
+
+/**
+ * Julia complex number struct
+ */
+struct cuComplex {
+   float   r;
+   float   i;
+   __device__ cuComplex( float a, float b ) : r(a), i(b)  {}
+   __device__ float magnitude2( void ) { return r * r + i * i; }
+   __device__ cuComplex operator*(const cuComplex& a) {
+      return cuComplex(r*a.r - i*a.i, i*a.r + r*a.i);
+   }
+   __device__ cuComplex operator+(const cuComplex& a) {
+      return cuComplex(r+a.r, i+a.i);
+   }
+};
 
 int main(int argc, char *argv[])
 {
    //Image size as first parameter
    int size;
-   if(argc == 2){
+   if(argc >= 2){
       size = atoi(argv[1]);
    } else{
       size = 1000;
    }
+
+   int mandelbrot = 0;
+   if(argv[2][0] == 'm' || argv[2][0] == 'M'){
+	   mandelbrot = 1;
+   }
+
    //Timers
    struct timeval start, end;
-   //Number of iterations per image
-   int iterations[] = {20, 25, 30, 35, 40, 50, 100, 300, 500, 1000};
 
-   //Array to keep track of pthreads
-   pthread_t threads[NUM];
+   gettimeofday(&start, NULL);
 
-   char out[] = "Mandelbrot-0.png";
-   int outSize = strlen(out) + 1;
-
-   //Copy size to the constant memory
-   HANDLE_ERROR( cudaMemcpyToSymbol(devSize, &size, sizeof(int)) );
-
-   //Allocate the device image buffer
-   float *devBuffer;
-   HANDLE_ERROR( cudaMalloc( (void **) &devBuffer, size * size * sizeof(float)) );
-
-   //Number of cuda threads to start
-   dim3  grid(size, size);
-
-   //Temp var for parameters
-   float *tmp;
-   tmp = (float *) malloc(sizeof(float));
-
-   for(int pos = 0; pos < NUM; pos++){
-      printf("Iteration %i\n", pos);
-
-      //11 is the position of the number in the filename
-      out[11] = (char) '0' + pos;
-
-      float minMu = iterations[pos];
-      float maxMu = 0;
-
-      // Create a test image - in this case a Mandelbrot Set fractal
-      // The output is a 1D array of floats, length: size * size
-      //float *buffer = createMandelbrotImage(size, -0.802, -0.177, 0.011, 100);
-
-      //Start Timer
-      gettimeofday(&start, NULL);
-
-      //Copy parameters into device constant memory
-      //Need to use a temp variable to hold the parameters (Might be changed to program arguments)
-      *tmp = -0.802f;
-      HANDLE_ERROR( cudaMemcpyToSymbol(xS, tmp, sizeof(float)) );
-      *tmp = -0.177f;
-      HANDLE_ERROR( cudaMemcpyToSymbol(yS, tmp, sizeof(float)) );
-      *tmp = 0.011f;
-      HANDLE_ERROR( cudaMemcpyToSymbol(rad, tmp, sizeof(float)) );
-      //Max iteration is in an array
-      HANDLE_ERROR( cudaMemcpyToSymbol(devMaxIteration, &(iterations[pos]), sizeof(int)) );
-
-      //Clear device memory
-      HANDLE_ERROR( cudaMemset(devBuffer, 0, size * size * sizeof(float)) );
-
-
-      //Allocate the memory for the image
-      float *buffer;
-      buffer = (float *) malloc(size * size * sizeof(float));
-
-      if(D) printf("Starting kernel\n");
-
-      //Start the kernel
-      createMandelbrotImage<<<grid,1>>>(devBuffer);
-
-      //Copy from device
-      HANDLE_ERROR( cudaMemcpy( buffer,  devBuffer, size*size*sizeof(float), cudaMemcpyDeviceToHost ) );
-
-      //Find mu min/max
-      for(int i = 0; i < size * size; i ++){
-    	  if(D && 0) printf("Mu: %f\n", buffer[i]);
-    	  if(buffer[i] < minMu) minMu = buffer[i];
-    	  if(buffer[i] > maxMu) maxMu = buffer[i];
-      }
-
-      if(D){
-    	  printf("Min mu: %f\n", minMu);
-    	  printf("Max mu: %f\n", maxMu);
-      }
-
-      //Normalize buffer values
-      for(int i = 0; i < size * size; i++){
-    	  if(D && 1) printf("Buffer[%i]: %f \n", i, buffer[i]);
-    	  buffer[i] = (buffer[i] - minMu) / (maxMu - minMu);
-
-      }
-
-      //End timer
-      gettimeofday(&end, NULL);
-
-      printf("Iteration %i time: %lf\n", pos, (end.tv_sec + (end.tv_usec/1000000.0)) - (start.tv_sec + (start.tv_usec/1000000.0)));
-
-      // Save the image to a PNG file
-      //Set up the struct
-      thread_data_t data;
-      data.buffer = buffer;
-      //Use the iteration number as TID
-      data.tid = pos;
-      data.size = size;
-
-      //Have to copy the filename
-      data.filename = (char *) malloc( outSize * sizeof(char) );
-      strncpy(data.filename, out, outSize);
-      //Always make sure to terminate
-      data.filename[outSize - 1] = '\0';
-
-      printf("Saving PNG\n\n");
-      //Start the pthread
-      pthread_create(&(threads[pos]), NULL, writeImage, (void *) &data);
-
-      //pthread_join(threads[pos], NULL);
-
-      //writeImage( (void *) &data);
+   if(mandelbrot){
+	   doMandelbrot(size);
+   } else {
+	   doJulia(size);
    }
 
-   //Free all the device memory
-   cudaFree(devBuffer);
+   gettimeofday(&end, NULL);
 
-   printf("Waiting for writing threads to finish...\n");
-   //Wait for the pthreads to finish before exiting
-   for(int i =0; i < NUM; i++){
-	   pthread_join(threads[i], NULL);
-   }
+   printf("\nTotal time: %lf\n", (end.tv_sec + (end.tv_usec/1000000.0)) - (start.tv_sec + (start.tv_usec/1000000.0)));
 
    printf("Done!\n");
    return 0;
 }
+
+/**
+ * Handles the whole mandelbrot process
+ */
+void doMandelbrot(int size){
+	//Timers
+	struct timeval start, end;
+	//Number of iterations per image
+	int iterations[] = {20, 25, 30, 35, 40, 50, 100, 300, 500, 1000};
+
+	//Array to keep track of pthreads
+	pthread_t threads[NUM];
+
+	char out[] = "Mandelbrot-0.png";
+	int outSize = strlen(out) + 1;
+
+	//Copy size to the constant memory
+	HANDLE_ERROR( cudaMemcpyToSymbol(devSize, &size, sizeof(int)) );
+
+	//Allocate the device image buffer
+	float *devBuffer;
+	HANDLE_ERROR( cudaMalloc( (void **) &devBuffer, size * size * sizeof(float)) );
+
+	//Number of cuda threads to start
+	dim3  grid(size, size);
+
+	//Temp var for parameters
+	float *tmp;
+	tmp = (float *) malloc(sizeof(float));
+
+	for(int pos = 0; pos < NUM; pos++){
+		printf("Iteration %i\n", pos);
+
+		//11 is the position of the number in the filename
+		out[11] = (char) '0' + pos;
+
+		float minMu = iterations[pos];
+		float maxMu = 0;
+
+		// Create a test image - in this case a Mandelbrot Set fractal
+		// The output is a 1D array of floats, length: size * size
+		//float *buffer = createMandelbrotImage(size, -0.802, -0.177, 0.011, 100);
+
+		//Start Timer
+		gettimeofday(&start, NULL);
+
+		//Copy parameters into device constant memory
+		//Need to use a temp variable to hold the parameters (Might be changed to program arguments)
+		*tmp = -0.802f;
+		HANDLE_ERROR( cudaMemcpyToSymbol(xS, tmp, sizeof(float)) );
+		*tmp = -0.177f;
+		HANDLE_ERROR( cudaMemcpyToSymbol(yS, tmp, sizeof(float)) );
+		*tmp = 0.011f;
+		HANDLE_ERROR( cudaMemcpyToSymbol(rad, tmp, sizeof(float)) );
+		//Max iteration is in an array
+		HANDLE_ERROR( cudaMemcpyToSymbol(devMaxIteration, &(iterations[pos]), sizeof(int)) );
+
+		//Clear device memory
+		HANDLE_ERROR( cudaMemset(devBuffer, 0, size * size * sizeof(float)) );
+
+
+		//Allocate the memory for the image
+		float *buffer;
+		buffer = (float *) malloc(size * size * sizeof(float));
+
+		//Start the kernel
+		createMandelbrotImage<<<grid,1>>>(devBuffer);
+
+		//Copy from device
+		HANDLE_ERROR( cudaMemcpy( buffer,  devBuffer, size*size*sizeof(float), cudaMemcpyDeviceToHost ) );
+
+		//Find mu min/max
+		for(int i = 0; i < size * size; i ++){
+			if(buffer[i] < minMu) minMu = buffer[i];
+			if(buffer[i] > maxMu) maxMu = buffer[i];
+		}
+
+		//Normalize buffer values
+		for(int i = 0; i < size * size; i++){
+			buffer[i] = (buffer[i] - minMu) / (maxMu - minMu);
+		}
+
+		//End timer
+		gettimeofday(&end, NULL);
+
+		printf("Iteration %i time: %lf\n", pos, (end.tv_sec + (end.tv_usec/1000000.0)) - (start.tv_sec + (start.tv_usec/1000000.0)));
+
+		// Save the image to a PNG file
+		//Set up the struct
+		thread_data_t data;
+		data.buffer = buffer;
+		//Use the iteration number as TID
+		data.tid = pos;
+		data.size = size;
+
+		//Have to copy the filename
+		data.filename = (char *) malloc( outSize * sizeof(char) );
+		strncpy(data.filename, out, outSize);
+		//Always make sure to terminate
+		data.filename[outSize - 1] = '\0';
+
+		printf("Saving PNG\n\n");
+		//Start the pthread
+		pthread_create(&(threads[pos]), NULL, writeImage, (void *) &data);
+
+		//pthread_join(threads[pos], NULL);
+
+		//writeImage( (void *) &data);
+	}
+
+	//Free all the device memory
+	cudaFree(devBuffer);
+
+	printf("Waiting for writing threads to finish...\n");
+	//Wait for the pthreads to finish before exiting
+	for(int i =0; i < NUM; i++){
+		pthread_join(threads[i], NULL);
+	}
+}
+
+void doJulia(int size){
+	//Timers
+	struct timeval start, end;
+	//Number of iterations per image
+	int iterations[] = {20, 25, 30, 35, 40, 50, 100, 200, 400};
+
+	//Array to keep track of pthreads
+	pthread_t threads[NUM];
+
+	char out[] = "Julia-0.png";
+	int outSize = strlen(out) + 1;
+
+	//Copy size to the constant memory
+	HANDLE_ERROR( cudaMemcpyToSymbol(devSize, &size, sizeof(int)) );
+
+	//Allocate the device image buffer
+	float *devBuffer;
+	HANDLE_ERROR( cudaMalloc( (void **) &devBuffer, size * size * sizeof(float)) );
+
+	//Number of cuda threads to start
+	dim3  grid(size, size);
+
+	for(int pos = 0; pos < NUM; pos++){
+		printf("Iteration %i\n", pos);
+
+		//6 is the position of the number in the filename
+		out[6] = (char) '0' + pos;
+
+		// Create a test image - in this case a Mandelbrot Set fractal
+		// The output is a 1D array of floats, length: size * size
+		//float *buffer = createMandelbrotImage(size, -0.802, -0.177, 0.011, 100);
+
+		//Start Timer
+		gettimeofday(&start, NULL);
+
+		//Copy parameters into device constant memory
+		//Need to use a temp variable to hold the parameters (Might be changed to program arguments)
+		//Max iteration is in an array
+		HANDLE_ERROR( cudaMemcpyToSymbol(devMaxIteration, &(iterations[pos]), sizeof(int)) );
+
+		//Clear device memory
+		HANDLE_ERROR( cudaMemset(devBuffer, 0, size * size * sizeof(float)) );
+
+
+		//Allocate the memory for the image
+		float *buffer;
+		buffer = (float *) malloc(size * size * sizeof(float));
+
+		//Start the kernel
+		j_kernel<<<grid,1>>>(devBuffer);
+
+		//Copy from device
+		HANDLE_ERROR( cudaMemcpy( buffer,  devBuffer, size*size*sizeof(float), cudaMemcpyDeviceToHost ) );
+
+		float maxValue = 0;
+		for(int i = 0; i < size*size; i++){
+			//printf("Buffer value: %f\n", buffer[i]);
+			if(buffer[i] > maxValue){
+				maxValue = buffer[i];
+			}
+		}
+		//scale between 0-1
+		for(int i = 0; i < size*size; i++){
+			buffer[i] = buffer[i] / maxValue;
+			//Inverse to remove lots of black
+			buffer[i] = 1 / buffer[i];
+		}
+
+		//End timer
+		gettimeofday(&end, NULL);
+
+		printf("Iteration %i time: %lf\n", pos, (end.tv_sec + (end.tv_usec/1000000.0)) - (start.tv_sec + (start.tv_usec/1000000.0)));
+
+		// Save the image to a PNG file
+		//Set up the struct
+		thread_data_t data;
+		data.buffer = buffer;
+		//Use the iteration number as TID
+		data.tid = pos;
+		data.size = size;
+
+		//Have to copy the filename
+		data.filename = (char *) malloc( outSize * sizeof(char) );
+		strncpy(data.filename, out, outSize);
+		//Always make sure to terminate
+		data.filename[outSize - 1] = '\0';
+
+		printf("Saving PNG\n\n");
+		//Start the pthread
+		pthread_create(&(threads[pos]), NULL, writeImage, (void *) &data);
+
+		//pthread_join(threads[pos], NULL);
+
+		//writeImage( (void *) &data);
+	}
+
+	//Free all the device memory
+	cudaFree(devBuffer);
+
+	printf("Waiting for writing threads to finish...\n");
+	//Wait for the pthreads to finish before exiting
+	for(int i =0; i < NUM; i++){
+		pthread_join(threads[i], NULL);
+	}
+}
+
 
 // Creates a test image for saving. Creates a Mandelbrot Set fractal of size size x size
 /**
@@ -207,12 +345,6 @@ __device__ void createMandelbrotImage(float *devBuffer)
    int Y = blockIdx.y;
    int offset = X+ Y *gridDim.x;
 
-	if(0 && D && threadIdx.x == 1){
-		printf("devBuffer: %i\n", devBuffer);
-		//printf("devSize: %i\n", devSize);
-		//printf("rad: %f\n", rad);
-		//printf("devMaxIteration: %i\n", devMaxIteration);
-	}
    // Create Mandelbrot set image
    float yP = (yS-rad) + (2.0f*rad/devSize)*Y;
 
@@ -225,7 +357,7 @@ __device__ void createMandelbrotImage(float *devBuffer)
    while (x*x + y+y <= 4 && iteration < devMaxIteration)
    {
 	   float tmp = x*x - y*y + xP;
-	   y = 2*x*y + yP;
+	   y = 2.0f*x*y + yP;
 	   x = tmp;
 	   iteration++;
    }
@@ -235,31 +367,51 @@ __device__ void createMandelbrotImage(float *devBuffer)
 	   float modZ = sqrt(x*x + y*y);
 	   float mu = iteration - (log(log(modZ))) / log(2.0f);
 
-	   /**
-	    * http://forums.nvidia.com/index.php?showtopic=91491
-	    */
-
-	   //Moved to host
-	   //if(mu > maxMu) atomicExch(&maxMu, mu);//atomicMax( &maxMu, mu); //if (mu > maxMu) maxMu = mu;
-	   //if(mu < minMu) atomicExch(&minMu, mu);//atomicMin( &minMu, mu); //if (mu < minMu) minMu = mu;
 	   devBuffer[offset] = mu;
    }
    else {
 	   devBuffer[offset] = 0;
    }
 
-   //devBuffer[threadIdx.y * devSize + threadIdx.x] = threadIdx.y * devSize + threadIdx.x;
-
-
-   // Scale buffer values between 0 and 1
-   //int count = devSize * devSize;
-   //while (count) {
-      //count --;
-   //Moved to host
-   //devBuffer[threadIdx.y * devSize + threadIdx.x] = (devBuffer[threadIdx.y + threadIdx.x] - minMu) / (maxMu - minMu);
-   //}
-
    return;
+}
+
+/**
+ * Julia kernel code
+ */
+__global__ void j_kernel(float *ptr ){
+
+   int x = blockIdx.x;
+   int y = blockIdx.y;
+
+   int index = x + y *gridDim.x ;
+
+   // This always gets a number below 1000, this constantly changes
+   //int x = index % size;
+   // Int division so this will only change every 1000
+   //int y = index / size;
+
+   //printf("Kernel return: %f\n", julia(size, x,y));
+   ptr[index] = julia(x,y );
+}
+
+__device__ float julia(int x, int y ) {
+   //const float scale = 1.5; Switched to define for more speed
+   float jx = J_SCALE * (float)(devSize/2 - x)/(devSize/2);
+   float jy = J_SCALE * (float)(devSize/2 - y)/(devSize/2);
+
+   cuComplex c(-0.8, 0.156);
+   cuComplex a(jx, jy);
+
+   int i = 0;
+   for (i=0; i< devMaxIteration; i++) {
+	   a = a * a + c;
+	   if (a.magnitude2() > 50000)
+		   return 0;
+	   //return a.magnitude2();
+   }
+
+   return a.magnitude2();
 }
 
 /*****************************
@@ -273,7 +425,9 @@ void *writeImage(void *input)
 	thread_data_t *data = (thread_data_t *) input;
 	int tid = data->tid;
 
-	printf("Writer thread %i starting\n", tid);
+	if(WRITE_V){
+		printf("Writer thread %i starting\n", tid);
+	}
 	char* filename = data->filename;
 	int size = data->size;
 	float *buffer = data->buffer;
@@ -333,7 +487,7 @@ void *writeImage(void *input)
 	if (title != NULL) {
 		png_text title_text;
 		title_text.compression = PNG_TEXT_COMPRESSION_NONE;
-		title_text.key = "Title";
+		title_text.key = title;//"Title";
 		title_text.text = title;
 		png_set_text(png_ptr, info_ptr, &title_text, 1);
 	}
@@ -366,14 +520,17 @@ void *writeImage(void *input)
 	}
 
 
-	printf("Writer thread %i ending\n", tid);
+	if(WRITE_V){
+		printf("Writer thread %i ending\n", tid);
+	}
 
 
 	//End timer
 	gettimeofday(&end, NULL);
 
-	printf("Writing %i time: %lf\n", tid, (end.tv_sec + (end.tv_usec/1000000.0)) - (start.tv_sec + (start.tv_usec/1000000.0)));
-
+	if(WRITE_V){
+		printf("Writing %i time: %lf\n", tid, (end.tv_sec + (end.tv_usec/1000000.0)) - (start.tv_sec + (start.tv_usec/1000000.0)));
+	}
 	// Free up the memory used to store the image
 	//free(buffer);
 	//free(filename);
