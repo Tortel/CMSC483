@@ -85,8 +85,10 @@ int main(int argc, char *argv[])
 
    //Julia or Mandelbrot image
    if(argv[2][0] == 'm' || argv[2][0] == 'M'){
+      printf("Running Mandelbrot code...\n\n");
 	   mandelbrot = 1;
    } else if(argv[2][0] == 'j' || argv[2][0] == 'J'){
+      printf("Running Julia code...\n\n");
        mandelbrot = 0;
    } else {
 		printf("Usage: %s <Image size> <m or j>\n", argv[0]);
@@ -129,7 +131,7 @@ void doMandelbrot(int size){
 	char out[] = "Mandelbrot-0.png";
 	int outSize = strlen(out) + 1;
 	for(int pos = 0; pos < NUM; pos++){
-		printf("Iteration %i\n", pos);
+		printf("Running %i iterations\n", iterations[pos]);
 
 		//11 is the position of the number in the filename
 		out[11] = (char) '0' + pos;
@@ -196,7 +198,7 @@ void doJulia(int size){
 	char out[] = "Julia-0.png";
 	int outSize = strlen(out) + 1;
 	for(int pos = 0; pos < NUM; pos++){
-		printf("Iteration %i\n", pos);
+      printf("Running %i iterations\n", iterations[pos]);
 
 		//6 is the position of the number in the filename
 		out[6] = (char) '0' + pos;
